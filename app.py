@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -113,35 +115,63 @@ st.markdown(
 
 @st.cache_data
 def load_data():
+    output_dir = Path(__file__).resolve().parent / "output"
+    result_files = {
+        "MapReduce": (
+            output_dir / "output_aqi_bucket.csv",
+            output_dir / "output_avg_pm25.csv",
+        ),
+        "PySpark": (
+            output_dir / "pyspark_aqi_bucket.csv",
+            output_dir / "pyspark_avg_pm25.csv",
+        ),
+    }
+    results = {}
 
-    aqi = pd.read_csv("output_aqi_bucket.csv")
-    pm25 = pd.read_csv("output_avg_pm25.csv")
+    for method, (aqi_path, pm25_path) in result_files.items():
+        aqi = pd.read_csv(aqi_path)
+        pm25 = pd.read_csv(pm25_path)
 
-    aqi.columns = aqi.columns.str.strip()
-    pm25.columns = pm25.columns.str.strip()
-
-    # Convert date
-    if "Date" in aqi.columns:
-        aqi["Date"] = pd.to_datetime(
-            aqi["Date"],
-            errors="coerce"
+        aqi.columns = aqi.columns.str.strip()
+        pm25.columns = pm25.columns.str.strip()
+        aqi = aqi.rename(
+            columns={
+                "date": "Date",
+                "AQI_Bucket": "AQI_Category",
+                "count": "Count",
+            }
         )
+        pm25 = pm25.rename(columns={"StationId": "Station_ID"})
 
-    # Convert count
-    if "Count" in aqi.columns:
-        aqi["Count"] = pd.to_numeric(
-            aqi["Count"],
-            errors="coerce"
+        required_columns = (
+            ("AQI", aqi, {"Date", "AQI_Category", "Count"}, aqi_path),
+            ("PM2.5", pm25, {"Station_ID", "Avg_PM25"}, pm25_path),
         )
+        for label, frame, required, path in required_columns:
+            missing = required.difference(frame.columns)
+            if missing:
+                raise ValueError(
+                    f"{label} result at {path} is missing columns: "
+                    f"{', '.join(sorted(missing))}"
+                )
+            if frame.empty:
+                raise ValueError(f"{label} result file is empty: {path}")
 
-    # Convert PM2.5
-    if "Avg_PM25" in pm25.columns:
-        pm25["Avg_PM25"] = pd.to_numeric(
-            pm25["Avg_PM25"],
-            errors="coerce"
-        )
+        aqi["Date"] = pd.to_datetime(aqi["Date"], errors="coerce")
+        aqi["AQI_Category"] = aqi["AQI_Category"].astype("string").str.strip()
+        aqi["Count"] = pd.to_numeric(aqi["Count"], errors="coerce")
+        aqi = aqi.dropna(subset=["Date", "AQI_Category", "Count"])
 
-    return aqi, pm25
+        pm25["Station_ID"] = pm25["Station_ID"].astype("string").str.strip()
+        pm25["Avg_PM25"] = pd.to_numeric(pm25["Avg_PM25"], errors="coerce")
+        pm25 = pm25.dropna(subset=["Station_ID", "Avg_PM25"])
+
+        if aqi.empty or pm25.empty:
+            raise ValueError(f"{method} result files contain no usable rows.")
+
+        results[method] = (aqi, pm25)
+
+    return results
 
 
 # ============================================================
@@ -149,22 +179,11 @@ def load_data():
 # ============================================================
 
 try:
-
-    aqi, pm25 = load_data()
+    results = load_data()
 
 except Exception as e:
-
     st.error("Unable to load the project data.")
-
-    st.write("Make sure these two files are in the same folder as app.py:")
-
-    st.code(
-        "output_aqi_bucket.csv\noutput_avg_pm25.csv"
-    )
-
-    st.write("Error:")
-    st.write(str(e))
-
+    st.error(str(e))
     st.stop()
 
 
@@ -210,9 +229,16 @@ with st.sidebar:
         ]
     )
 
+    analysis_method = st.radio(
+        "Results source",
+        ["MapReduce", "PySpark"],
+    )
+
     st.markdown("---")
 
     st.caption("Air Quality Data in India")
+
+aqi, pm25 = results[analysis_method]
 
 
 # ============================================================
@@ -226,10 +252,11 @@ st.markdown(
 
 st.markdown(
     '<div class="sub-title">'
-    'India air quality analysis using Hadoop MapReduce'
+    'India air quality analysis using MapReduce and PySpark'
     '</div>',
     unsafe_allow_html=True
 )
+st.caption(f"Showing {analysis_method} results")
 
 
 # ============================================================
@@ -269,13 +296,13 @@ if page == "Dashboard":
             f"""
             <div class="metric-card">
                 <div class="metric-label">
-                    RECORDS PROCESSED
+                    AQI RECORDS COUNTED
                 </div>
                 <div class="metric-value">
-                    1.8M+
+                    {int(aqi["Count"].sum()):,}
                 </div>
                 <div class="metric-small">
-                    After preprocessing
+                    {analysis_method} result
                 </div>
             </div>
             """,
@@ -388,7 +415,7 @@ if page == "Dashboard":
 
         st.plotly_chart(
             fig,
-            use_container_width=True
+            width="stretch"
         )
 
     # --------------------------------------------------------
@@ -450,7 +477,7 @@ if page == "Dashboard":
 
             st.plotly_chart(
                 fig,
-                use_container_width=True
+                width="stretch"
             )
 
     # AQI composition
@@ -497,7 +524,7 @@ if page == "Dashboard":
 
             st.plotly_chart(
                 fig,
-                use_container_width=True
+                width="stretch"
             )
 
     # --------------------------------------------------------
@@ -634,7 +661,7 @@ elif page == "AQI Trends":
 
     st.plotly_chart(
         fig,
-        use_container_width=True
+        width="stretch"
     )
 
     # --------------------------------------------------------
@@ -682,7 +709,7 @@ elif page == "AQI Trends":
 
     st.plotly_chart(
         fig,
-        use_container_width=True
+        width="stretch"
     )
 
     # --------------------------------------------------------
@@ -701,7 +728,7 @@ elif page == "AQI Trends":
 
         st.dataframe(
             table_data,
-            use_container_width=True,
+            width="stretch",
             hide_index=True
         )
 
@@ -777,7 +804,7 @@ elif page == "PM2.5 Analysis":
 
     st.plotly_chart(
         fig,
-        use_container_width=True
+        width="stretch"
     )
 
     # --------------------------------------------------------
@@ -878,7 +905,7 @@ elif page == "PM2.5 Analysis":
 
     st.plotly_chart(
         fig,
-        use_container_width=True
+        width="stretch"
     )
 
     # --------------------------------------------------------
@@ -907,7 +934,7 @@ elif page == "PM2.5 Analysis":
 
     st.dataframe(
         station_result,
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )
 
