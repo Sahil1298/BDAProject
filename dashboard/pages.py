@@ -130,6 +130,23 @@ def _render_header(analysis_method):
     st.caption(f"Showing {analysis_method} results")
 
 
+def _render_processing_method(analysis_method):
+    if analysis_method == "MapReduce":
+        st.subheader("MapReduce Processing")
+        st.write("Mapper → Shuffle/Sort → Reducer")
+        st.caption(
+            "Results are loaded from output/output_aqi_bucket.csv and "
+            "output/output_avg_pm25.csv."
+        )
+    else:
+        st.subheader("PySpark Processing")
+        st.write("Spark DataFrame → groupBy/aggregation")
+        st.caption(
+            "Results are loaded from output/pyspark_aqi_bucket.csv and "
+            "output/pyspark_avg_pm25.csv."
+        )
+
+
 def _render_dashboard(aqi, pm25, analysis_method):
     total_stations = pm25["Station_ID"].nunique() if "Station_ID" in pm25.columns else 0
     total_dates = aqi["Date"].nunique() if "Date" in aqi.columns else 0
@@ -350,6 +367,7 @@ def run_app():
     page, analysis_method = _render_sidebar()
     aqi, pm25 = results[analysis_method]
     _render_header(analysis_method)
+    _render_processing_method(analysis_method)
 
     if page == "Dashboard":
         _render_dashboard(aqi, pm25, analysis_method)
